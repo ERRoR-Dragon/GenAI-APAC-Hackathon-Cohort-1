@@ -1,0 +1,302 @@
+# ============================================================
+# ReloScope — MCP Toolbox for Databases Configuration
+# ============================================================
+# This file defines the AlloyDB connection and the parameterized
+# SQL tools that agents can invoke via MCP protocol.
+# ============================================================
+
+sources:
+  reloscope-db:
+    kind: alloydb-postgres
+    project: project-cohort-one
+    region: asia-south1
+    cluster: reloscope-cluster
+    instance: reloscope-primary
+    database: reloscope
+    user: agent_user
+    password: ${ALLOYDB_PASSWORD}
+
+tools:
+  # ─────────────── USER PROFILES ───────────────
+  save_user_profile:
+    kind: postgres-sql
+    source: reloscope-db
+    description: "Save or update a user's relocation preferences and priorities"
+    parameters:
+      - name: user_email
+        type: string
+        description: "User's email address"
+      - name: priorities_json
+        type: string
+        description: "JSON with weighted priorities like air_quality, commute, amenities, climate, investment, cost"
+      - name: workplace_address
+        type: string
+        description: "User's office/workplace address for commute calculation"
+    statement: |
+      INSERT INTO user_profiles (user_email, priorities, workplace_address, created_at)
+      VALUES ($1, $2::jsonb, $3, NOW())
+      ON CONFLICT (user_email) DO UPDATE
+      SET priorities = $2::jsonb, workplace_address = $3, updated_at = NOW()
+      RETURNING id, user_email;
+
+  get_user_profile:
+    kind: postgres-sql
+    source: reloscope-db
+    description: "Retrieve a user's stored preferences and priorities"
+    parameters:
+      - name: user_email
+        type: string
+    statement: |
+      SELECT * FROM user_profiles WHERE user_email = $1;
+
+  # ─────────────── CITY ANALYSES ───────────────
+  save_city_analysis:
+    kind: postgres-sql
+    source: reloscope-db
+    description: "Store a complete city analysis with environment, livability, and investment data"
+    parameters:
+      - name: city
+        type: string
+      - name: state_name
+        type: string
+      - name: latitude
+        type: number
+      - name: longitude
+        type: number
+      - name: air_quality_aqi
+        type: number
+      - name: aqi_category
+        type: string
+      - name: avg_temp
+        type: number
+      - name: amenity_density_score
+        type: number
+      - name: school_count
+        type: number
+      - name: hospital_count
+        type: number
+      - name: commute_drive_min
+        type: number
+      - name: commute_transit_min
+        type: number
+      - name: weighted_score
+        type: number
+      - name: raw_data_json
+        type: string
+    statement: |
+      INSERT INTO city_analyses (
+        city, state, latitude, longitude,
+        air_quality_aqi, aqi_category, avg_temp_celsius,
+        amenity_density_score, school_count, hospital_count,
+        commute_drive_min, commute_transit_min,
+        weighted_score, raw_data, created_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+        $14::jsonb, NOW()
+      ) RETURNING id;
+
+  get_city_analyses:
+    kind: postgres-sql
+    source: reloscope-db
+    description: "Retrieve past analyses for a city, newest first. Use to compare current vs historical data."
+    parameters:
+      - name: city
+        type: string
+    statement: |
+      SELECT * FROM city_analyses
+      WHERE LOWER(city) = LOWER($1)
+      ORDER BY created_at DESC
+      LIMIT 5;
+
+  # ─────────────── NEIGHBORHOOD ANALYSES ───────────────
+  save_neighborhood_analysis:
+    kind: postgres-sql
+    source: reloscope-db
+    description: "Store a neighborhood-level analysis within a city"
+    parameters:
+      - name: city
+        type: string
+      - name: neighborhood
+        type: string
+      - name: latitude
+        type: number
+      - name: longitude
+        type: number
+      - name: air_quality_aqi
+        type: number
+      - name: amenity_density_score
+        type: number
+      - name: amenity_counts_json
+        type: string
+      - name: commute_drive_min
+        type: number
+      - name: raw_data_json
+        type: string
+    statement: |
+      INSERT INTO neighborhood_analyses (
+        city, neighborhood, latitude, longitude,
+        air_quality_aqi, amenity_density_score, amenity_counts,
+        commute_drive_min, raw_data, created_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9::jsonb, NOW()
+      ) RETURNING id;
+
+  get_neighborhood_analyses:
+    kind: postgres-sql
+    source: reloscope-db
+    description: "Retrieve past analyses for neighborhoods in a specific city"
+    parameters:
+      - name: city
+        type: string
+    statement: |
+      SELECT * FROM neighborhood_analyses
+      WHERE LOWER(city) = LOWER($1)
+      ORDER BY created_at DESC;
+
+  # ─────────────── SEMANTIC SEARCH ───────────────
+  find_similar_neighborhoods:
+    kind: postgres-sql
+    source: reloscope-db
+    description: "Find neighborhoods similar to a given one using vector embedding similarity. Used for 'find me areas like Koramangala' queries."
+    parameters:
+      - name: query_embedding
+        type: string
+        description: "The embedding vector of the reference neighborhood"
+      - name: target_city
+        type: string
+        description: "City to search within, or 'any' for all cities"
+    statement: |
+      SELECT
+        neighborhood, city,
+        amenity_counts, commute_drive_min, air_quality_aqi,
+        1 - (embedding <=> $1::vector) as similarity_score
+      FROM neighborhood_analyses
+      WHERE ($2 = 'any' OR LOWER(city) = LOWER($2))
+        AND embedding IS NOT NULL
+      ORDER BY embedding <=> $1::vector
+      LIMIT 5;
+
+  # ─────────────── BUSINESS ANALYSES ───────────────
+  save_business_analysis:
+    kind: postgres-sql
+    source: reloscope-db
+    description: "Store a business opportunity analysis for a specific area"
+    parameters:
+      - name: city
+        type: string
+      - name: neighborhood
+        type: string
+      - name: business_type
+        type: string
+      - name: competition_count
+        type: number
+      - name: demand_score
+        type: number
+      - name: opportunity_score
+        type: number
+      - name: analysis_json
+        type: string
+    statement: |
+      INSERT INTO business_analyses (
+        city, neighborhood, business_type,
+        competition_count, demand_score, opportunity_score,
+        analysis, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, NOW())
+      RETURNING id;
+
+  # ─────────────── COMPARISON REPORTS ───────────────
+  save_comparison_report:
+    kind: postgres-sql
+    source: reloscope-db
+    description: "Save a comparison report with document links for retrieval"
+    parameters:
+      - name: user_email
+        type: string
+      - name: query
+        type: string
+      - name: cities_compared
+        type: string
+        description: "Comma-separated list of cities compared"
+      - name: winner
+        type: string
+      - name: scores_json
+        type: string
+      - name: recommendation
+        type: string
+      - name: spreadsheet_url
+        type: string
+      - name: document_url
+        type: string
+    statement: |
+      INSERT INTO comparison_reports (
+        user_email, query, cities_compared, winner,
+        weighted_scores, recommendation, spreadsheet_url, document_url,
+        created_at
+      ) VALUES (
+        $1, $2, string_to_array($3, ','), $4,
+        $5::jsonb, $6, $7, $8, NOW()
+      ) RETURNING id;
+
+  get_user_reports:
+    kind: postgres-sql
+    source: reloscope-db
+    description: "Retrieve all past reports for a user to show history"
+    parameters:
+      - name: user_email
+        type: string
+    statement: |
+      SELECT id, query, cities_compared, winner, 
+        spreadsheet_url, document_url, created_at
+      FROM comparison_reports
+      WHERE user_email = $1
+      ORDER BY created_at DESC
+      LIMIT 10;
+
+  # ─────────────── AREA MONITORING ───────────────
+  save_monitored_area:
+    kind: postgres-sql
+    source: reloscope-db
+    description: "Register a neighborhood for ongoing monthly monitoring"
+    parameters:
+      - name: city
+        type: string
+      - name: neighborhood
+        type: string
+      - name: user_email
+        type: string
+      - name: baseline_json
+        type: string
+    statement: |
+      INSERT INTO monitored_areas (
+        city, neighborhood, user_email,
+        baseline_snapshot, monitoring_active, created_at
+      ) VALUES ($1, $2, $3, $4::jsonb, TRUE, NOW())
+      RETURNING id;
+
+  get_monitored_areas:
+    kind: postgres-sql
+    source: reloscope-db
+    description: "Get all actively monitored areas, optionally filtered by user"
+    parameters:
+      - name: user_email
+        type: string
+        description: "User email, or 'all' to get all active monitors"
+    statement: |
+      SELECT * FROM monitored_areas
+      WHERE ($1 = 'all' OR user_email = $1)
+        AND monitoring_active = TRUE;
+
+toolsets:
+  reloscope_tools:
+    - save_user_profile
+    - get_user_profile
+    - save_city_analysis
+    - get_city_analyses
+    - save_neighborhood_analysis
+    - get_neighborhood_analyses
+    - find_similar_neighborhoods
+    - save_business_analysis
+    - save_comparison_report
+    - get_user_reports
+    - save_monitored_area
+    - get_monitored_areas

@@ -1,0 +1,28 @@
+# Environment and Secrets
+.env
+*.json
+client_secret.json
+*-*.json
+
+# Virtual Environment
+.venv/
+env/
+venv/
+ENV/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# IDEs and OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# ADK and Framework
+.adk/
+logs/
+artifacts/

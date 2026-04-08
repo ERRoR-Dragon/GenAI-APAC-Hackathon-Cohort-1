@@ -1,0 +1,8 @@
+google-adk
+google-cloud-bigquery
+google-cloud-translate
+google-api-python-client
+google-auth
+google-auth-oauthlib
+python-dotenv
+requests
