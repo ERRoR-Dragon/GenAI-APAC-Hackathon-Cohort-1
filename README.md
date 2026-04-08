@@ -53,8 +53,8 @@ We've deliberately made running ReloScope on your own machine incredibly simple.
 
 ### 1. Clone the Repository
 ```bash
-git clone <your-repo-link>
-cd "project-name"
+git clone https://github.com/ERRoR-Dragon/GenAI-APAC-Hackathon-Cohort-1.git
+cd "GenAI-APAC-Hackathon-Cohort-1"
 ```
 
 ### 2. Set Up Your Python Environment
@@ -99,7 +99,21 @@ GOOGLE_MAPS_API_KEY=<your_copied_api_key_here>
 ```
 *(To get your Maps API key, visit the Google Cloud Console > APIs & Services > Credentials, click "Create Credentials -> API Key," and explicitly restrict it to the Maps, Routes, Places, Solar, Air Quality, Elevation, and Weather APIs).*
 
-### 5. Launch the ADK Dev Server
+### 5. Google Workspace Service Account JSON (Crucial!)
+To allow the agents to dynamically write Google Docs, format Google Sheets, and schedule Google Calendar tours entirely headlessly (*without* forcing browser OAuth popups), you must supply a **GCP Service Account JSON Key**.
+
+1. Go to [Google Cloud Console > IAM & Admin > Service Accounts](https://console.cloud.google.com/iam-admin/serviceaccounts).
+2. Click **Create Service Account**, name it (e.g., `reloscope-agent`), and grant it the **Editor** role for your project.
+3. Once created, click on the Service Account, go to the **Keys** tab, and click **Add Key > Create New Key > JSON**.
+4. The `.json` file will download to your machine.
+5. Move this JSON file into the root folder of your project setup.
+6. Open your `.env` file again and add the absolute official GCP environment variable pointing to the file:
+```env
+GOOGLE_APPLICATION_CREDENTIALS="./<your-key-file-name>.json"
+```
+*Note: The project's `.gitignore` is already built to protect `.json` files, ensuring your keys are never accidentally pushed to GitHub.*
+
+### 6. Launch the ADK Dev Server
 Start the local Google ADK Web Interface to interact with the ReloScope agents!
 ```bash
 adk web
